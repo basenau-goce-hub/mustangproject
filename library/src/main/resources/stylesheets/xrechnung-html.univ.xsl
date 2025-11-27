@@ -1800,7 +1800,7 @@ function downloadData (element_id) {
                             <div id="BT-147" title="BT-147" class="boxdaten wert">
                             <!-- Änderung auf "for-each", um über xr:Item_price_discount zu iterieren -->
                                 <xsl:for-each select="xr:PRICE_DETAILS/xr:Item_price_discount[@xr:type='allowance' or not(@xr:type)]">
-                                    <xsl:value-of select="."/>
+                                    <xsl:value-of select="translate(., '.', ',')"/>
                                     <xsl:if test="position() != last()">
                                         <br/>
                                     </xsl:if>
@@ -1813,7 +1813,7 @@ function downloadData (element_id) {
                                 <div class="boxdaten legende "><xsl:value-of select="$i18n.bt147-1"/>:</div>
                                 <div class="boxdaten wert">
                                     <xsl:for-each select="xr:PRICE_DETAILS/xr:Item_price_discount[@xr:type='charge']">
-                                        <xsl:value-of select="."/>
+                                        <xsl:value-of select="translate(., '.', ',')"/>
                                         <xsl:if test="position() != last()">
                                             <br/>
                                         </xsl:if>
