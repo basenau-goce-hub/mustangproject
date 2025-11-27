@@ -124,6 +124,7 @@
     <xsl:variable name="i18n.bt146" select="'Preis pro Einheit (netto)'"/>
     <xsl:variable name="i18n.bt131" select="'Gesamtpreis (netto)'"/>
     <xsl:variable name="i18n.bt147" select="'Rabatt (netto)'"/>
+    <xsl:variable name="i18n.bt147-1" select="'Zuschlag (netto)'"/>
     <xsl:variable name="i18n.bt148" select="'Listenpreis (netto)'"/>
     <xsl:variable name="i18n.bt149" select="'Anzahl der Einheit'"/>
     <xsl:variable name="i18n.bt150" select="'Code der Maßeinheit'"/>

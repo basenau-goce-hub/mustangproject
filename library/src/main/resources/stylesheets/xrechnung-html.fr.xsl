@@ -124,6 +124,7 @@
     <xsl:variable name="i18n.bt146" select="'Prix unitaire net'"/>
     <xsl:variable name="i18n.bt131" select="'Prix total net'"/>
     <xsl:variable name="i18n.bt147" select="'Remise nette'"/>
+    <xsl:variable name="i18n.bt147-1" select="'Supplément net'"/>
     <xsl:variable name="i18n.bt148" select="'Prix catalogue (net)'"/>
     <xsl:variable name="i18n.bt149" select="'Nombre d''unités'"/>
     <xsl:variable name="i18n.bt150" select="'Code de l''unité de mesure '"/>

@@ -1754,8 +1754,14 @@ function downloadData (element_id) {
                   <div class="boxdaten legende ">Rabatt (netto) (BT-147):</div>
                   <div id="BT-147" title="BT-147" class="boxdaten wert"><xsl:value-of select="format-number(xr:PRICE_DETAILS/xr:Item_price_discount,'###.##0,00','decimal')"/></div>
                 </div>
+                <!--
                 <div class="boxzeile">
-                  <div class="boxdaten legende ">Listenpreis (netto) BT-148):</div>
+                  <div class="boxdaten legende ">Zuschlag (netto) (BT-147):</div>
+                  <div id="BT-147-1" title="BT-147" class="boxdaten wert"><xsl:value-of select="format-number(xr:PRICE_DETAILS/xr:Item_price_charge,'###.##0,00','decimal')"/></div>
+                </div>
+                -->
+                <div class="boxzeile">
+                  <div class="boxdaten legende ">Listenpreis (netto) (BT-148):</div>
                   <div id="BT-148" title="BT-148" class="boxdaten wert"><xsl:value-of select="format-number(xr:PRICE_DETAILS/xr:Item_gross_price,'###.##0,00','decimal')"/></div>
                 </div>
                 <div class="boxzeile">
