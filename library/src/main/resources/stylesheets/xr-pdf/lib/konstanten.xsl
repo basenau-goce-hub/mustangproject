@@ -30,7 +30,9 @@
     <xsl:attribute name="line-height">12pt</xsl:attribute>
     <xsl:attribute name="hyphenation-ladder-count">3</xsl:attribute>
     <xsl:attribute name="hyphenate">true</xsl:attribute>
-    <xsl:attribute name="language">de</xsl:attribute>
+    <xsl:attribute name="language">
+      <xsl:value-of select="$lang"/>
+    </xsl:attribute>
   </xsl:attribute-set>
   
   <!-- H1 Marker -->

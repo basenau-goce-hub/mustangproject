@@ -18,22 +18,45 @@
  *********************************************************************** */
 package org.mustangproject.commandline;
 
-import org.apache.commons.cli.*;
-import org.apache.commons.io.FilenameUtils;
-import org.mustangproject.CII.CIIToUBL;
-import org.mustangproject.EStandard;
-import org.mustangproject.FileAttachment;
-import org.mustangproject.ZUGFeRD.*;
-import org.mustangproject.validator.ZUGFeRDValidator;
-import org.slf4j.LoggerFactory;
-
-import javax.xml.transform.TransformerException;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+
+import javax.xml.transform.TransformerException;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.UnrecognizedOptionException;
+import org.apache.commons.io.FilenameUtils;
+import org.mustangproject.CII.CIIToUBL;
+import org.mustangproject.EStandard;
+import org.mustangproject.FileAttachment;
+import org.mustangproject.ZUGFeRD.DXExporterFromA1;
+import org.mustangproject.ZUGFeRD.IZUGFeRDExporter;
+import org.mustangproject.ZUGFeRD.OXExporterFromA1;
+import org.mustangproject.ZUGFeRD.Profile;
+import org.mustangproject.ZUGFeRD.Profiles;
+import org.mustangproject.ZUGFeRD.ValidationLogVisualizer;
+import org.mustangproject.ZUGFeRD.XMLUpgrader;
+import org.mustangproject.ZUGFeRD.ZUGFeRDExporterFromA1;
+import org.mustangproject.ZUGFeRD.ZUGFeRDExporterFromA3;
+import org.mustangproject.ZUGFeRD.ZUGFeRDExporterFromPDFA;
+import org.mustangproject.ZUGFeRD.ZUGFeRDImporter;
+import org.mustangproject.ZUGFeRD.ZUGFeRDVisualizer;
+import org.mustangproject.validator.ZUGFeRDValidator;
+import org.slf4j.LoggerFactory;
 
 public class Main {
 	private static org.slf4j.Logger LOGGER; // log output
@@ -818,16 +841,18 @@ public class Main {
 		} else {
 			System.out.println("ZUGFeRD XML source set to " + sourceName);
 		}
-		if (!intoPDF) {
-			if (lang == null) {
-				try {
-					lang = getStringFromUser("Output language", "en", "en|de|fr");
-				} catch (Exception e) {
-					LOGGER.error(e.getMessage(), e);
-				}
-			} else {
-				System.out.println("Output language set to " + lang);
+		if (lang == null) {
+			String defaultLang = "en";
+			if (intoPDF) {
+				defaultLang = "de";
 			}
+			try {
+				lang = getStringFromUser("Output language", defaultLang, "en|de|fr");
+			} catch (Exception e) {
+				LOGGER.error(e.getMessage(), e);
+			}
+		} else {
+			System.out.println("Output language set to " + lang);
 		}
 
 		if (outName == null) {
@@ -855,18 +880,12 @@ public class Main {
 		ZUGFeRDVisualizer zvi = new ZUGFeRDVisualizer();
 		String xml = null;
 		try {
+			ZUGFeRDVisualizer.Language langCode = determineLanguage(lang, intoPDF);
 			if (!intoPDF) {
-				ZUGFeRDVisualizer.Language langCode = ZUGFeRDVisualizer.Language.EN;
-				if (lang.equalsIgnoreCase("de")) {
-					langCode = ZUGFeRDVisualizer.Language.DE;
-				}
-				if (lang.equalsIgnoreCase("fr")) {
-					langCode = ZUGFeRDVisualizer.Language.FR;
-				}
 				xml = zvi.visualize(sourceName, langCode);
 				Files.write(Paths.get(outName), xml.getBytes());
 			} else {
-				zvi.toPDF(sourceName, outName);
+				zvi.toPDF(sourceName, outName, langCode);
 			}
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
@@ -887,6 +906,26 @@ public class Main {
 		}
 
 
+	}
+
+	private static ZUGFeRDVisualizer.Language determineLanguage(String lang, boolean intoPDF) {
+		ZUGFeRDVisualizer.Language defaultLang = intoPDF ? ZUGFeRDVisualizer.Language.DE : ZUGFeRDVisualizer.Language.EN;
+		if (lang == null) {
+			return defaultLang;
+		}
+		if (lang.equalsIgnoreCase("de")) {
+			return ZUGFeRDVisualizer.Language.DE;
+		}
+		if (lang.equalsIgnoreCase("fr")) {
+			return ZUGFeRDVisualizer.Language.FR;
+		}
+		if (lang.equalsIgnoreCase("en")) {
+			return ZUGFeRDVisualizer.Language.EN;
+		}
+		if (LOGGER != null) {
+			LOGGER.warn("Unknown language '{}', falling back to {}", lang, defaultLang);
+		}
+		return defaultLang;
 	}
 
 	/**
