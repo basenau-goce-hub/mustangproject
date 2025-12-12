@@ -33,6 +33,7 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -105,6 +106,42 @@ public class ZUGFeRDVisualizer {
 	private EnumMap<Language, Templates> mXsltHTMLTemplates = null;
 	private Templates mXsltPDFTemplate = null;
 	private Templates mXsltZF1HTMLTemplate = null;
+
+	private boolean resourceExists(String resourcePath) {
+		return CLASS_LOADER.getResource(resourcePath) != null;
+	}
+
+	public boolean isLanguageSupported(Language lang, boolean forPDF) {
+		if (lang == null) {
+			return false;
+		}
+		String langCode = lang.name().toLowerCase();
+		if (forPDF) {
+			// PDF uses xr-pdf + l10n files for labels
+			return resourceExists("stylesheets/l10n/" + langCode + ".xml");
+		}
+		// HTML uses dedicated templates per language; l10n is not required there
+		return resourceExists("stylesheets/xrechnung-html." + langCode + ".xsl");
+	}
+
+	public String getMissingLanguageResources(Language lang, boolean forPDF) {
+		if (lang == null) {
+			return "language not specified";
+		}
+		ArrayList<String> missing = new ArrayList<>();
+		String langCode = lang.name().toLowerCase();
+		if (forPDF) {
+			if (!resourceExists("stylesheets/l10n/" + langCode + ".xml")) {
+				missing.add("stylesheets/l10n/" + langCode + ".xml");
+			}
+		} else if (!resourceExists("stylesheets/xrechnung-html." + langCode + ".xsl")) {
+			missing.add("stylesheets/xrechnung-html." + langCode + ".xsl");
+		}
+		if (missing.isEmpty()) {
+			return "";
+		}
+		return String.join(", ", missing);
+	}
 
 	private Language getLanguageOrDefault(Language lang) {
 		if (lang == null) {

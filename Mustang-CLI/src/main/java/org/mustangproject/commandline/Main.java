@@ -835,24 +835,22 @@ public class Main {
 	}
 
 	private static void performVisualization(String sourceName, String lang, String outName, boolean intoPDF) {
+		ZUGFeRDVisualizer zvi = new ZUGFeRDVisualizer();
+
 		// Get params from user if not already defined
 		if (sourceName == null) {
 			sourceName = getFilenameFromUser("ZUGFeRD XML source", "factur-x.xml", "xml", true, false);
 		} else {
 			System.out.println("ZUGFeRD XML source set to " + sourceName);
 		}
-		if (lang == null) {
-			String defaultLang = "en";
-			if (intoPDF) {
-				defaultLang = "de";
-			}
-			try {
-				lang = getStringFromUser("Output language", defaultLang, "en|de|fr");
-			} catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
-			}
-		} else {
-			System.out.println("Output language set to " + lang);
+		lang = resolveLanguageInput(lang, intoPDF, zvi);
+		ZUGFeRDVisualizer.Language langCode = null;
+		try {
+			langCode = determineLanguage(lang, intoPDF, zvi);
+			ensureLanguageSupported(lang, langCode, intoPDF, zvi);
+		} catch (IllegalArgumentException iae) {
+			System.err.println(iae.getMessage());
+			return;
 		}
 
 		if (outName == null) {
@@ -877,21 +875,27 @@ public class Main {
 			LOGGER.error(e.getMessage(), e);
 		}
 
-		ZUGFeRDVisualizer zvi = new ZUGFeRDVisualizer();
 		String xml = null;
+		boolean rendered = false;
 		try {
-			ZUGFeRDVisualizer.Language langCode = determineLanguage(lang, intoPDF);
 			if (!intoPDF) {
 				xml = zvi.visualize(sourceName, langCode);
 				Files.write(Paths.get(outName), xml.getBytes());
 			} else {
 				zvi.toPDF(sourceName, outName, langCode);
 			}
+			rendered = true;
+		} catch (IllegalArgumentException iae) {
+			System.err.println(iae.getMessage());
+			return;
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
 			System.err.println(e.getMessage());
+			return;
 		}
-		System.out.println("Written to " + outName);
+		if (rendered) {
+			System.out.println("Written to " + outName);
+		}
 
 		if (!intoPDF) {
 
@@ -908,24 +912,84 @@ public class Main {
 
 	}
 
-	private static ZUGFeRDVisualizer.Language determineLanguage(String lang, boolean intoPDF) {
+	private static ZUGFeRDVisualizer.Language determineLanguage(String lang, boolean intoPDF, ZUGFeRDVisualizer zvi) {
 		ZUGFeRDVisualizer.Language defaultLang = intoPDF ? ZUGFeRDVisualizer.Language.DE : ZUGFeRDVisualizer.Language.EN;
-		if (lang == null) {
+		if ((lang == null) || (lang.length() == 0)) {
 			return defaultLang;
 		}
-		if (lang.equalsIgnoreCase("de")) {
-			return ZUGFeRDVisualizer.Language.DE;
+		for (ZUGFeRDVisualizer.Language candidate : ZUGFeRDVisualizer.Language.values()) {
+			if (candidate.name().equalsIgnoreCase(lang)) {
+				return candidate;
+			}
 		}
-		if (lang.equalsIgnoreCase("fr")) {
-			return ZUGFeRDVisualizer.Language.FR;
+		String available = formatSupportedLanguages(zvi, intoPDF);
+		throw new IllegalArgumentException(String.format("Unsupported language code '%s'. Available languages: %s", lang, available));
+	}
+
+	private static String resolveLanguageInput(String lang, boolean intoPDF, ZUGFeRDVisualizer zvi) {
+		if (lang != null) {
+			System.out.println("Output language set to " + lang);
+			return lang;
 		}
-		if (lang.equalsIgnoreCase("en")) {
-			return ZUGFeRDVisualizer.Language.EN;
+		ArrayList<String> supported = getSupportedLanguageCodes(zvi, intoPDF);
+		String defaultLang = intoPDF ? "de" : "en";
+		if (!supported.contains(defaultLang) && !supported.isEmpty()) {
+			defaultLang = supported.get(0);
 		}
-		if (LOGGER != null) {
-			LOGGER.warn("Unknown language '{}', falling back to {}", lang, defaultLang);
+		if (supported.isEmpty()) {
+			throw new IllegalArgumentException("No output languages available.");
 		}
-		return defaultLang;
+
+		System.out.print("Output language (default: " + defaultLang + ") (" + String.join("|", supported) + "):");
+		BufferedReader buffer = new BufferedReader(new InputStreamReader(System.in));
+		String selected = "";
+		try {
+			selected = buffer.readLine();
+		} catch (IOException e) {
+			LOGGER.error(e.getMessage(), e);
+			throw new IllegalArgumentException("Failed to read language input");
+		}
+		if ((selected == null) || (selected.length() == 0)) {
+			return defaultLang;
+		}
+		if (!supported.contains(selected.toLowerCase())) {
+			throw new IllegalArgumentException(String.format("Unsupported language code '%s'. Available languages: %s", selected, String.join(", ", supported)));
+		}
+		return selected;
+	}
+
+	private static ArrayList<String> getSupportedLanguageCodes(ZUGFeRDVisualizer zvi, boolean intoPDF) {
+		ArrayList<String> langs = new ArrayList<>();
+		for (ZUGFeRDVisualizer.Language candidate : ZUGFeRDVisualizer.Language.values()) {
+			if (zvi.isLanguageSupported(candidate, intoPDF)) {
+				langs.add(candidate.name().toLowerCase());
+			}
+		}
+		return langs;
+	}
+
+	private static void ensureLanguageSupported(String requestedLang, ZUGFeRDVisualizer.Language lang, boolean intoPDF, ZUGFeRDVisualizer zvi) {
+		if (zvi.isLanguageSupported(lang, intoPDF)) {
+			return;
+		}
+		String missing = zvi.getMissingLanguageResources(lang, intoPDF);
+		String available = formatSupportedLanguages(zvi, intoPDF);
+		String humanRequestedLang = (requestedLang == null) ? lang.name().toLowerCase() : requestedLang;
+		throw new IllegalArgumentException(String.format("Language '%s' is not available for %s output. Missing resources: %s. Available languages: %s",
+			humanRequestedLang, (intoPDF ? "PDF" : "HTML"), missing, available));
+	}
+
+	private static String formatSupportedLanguages(ZUGFeRDVisualizer zvi, boolean intoPDF) {
+		ArrayList<String> langs = new ArrayList<>();
+		for (ZUGFeRDVisualizer.Language candidate : ZUGFeRDVisualizer.Language.values()) {
+			if (zvi.isLanguageSupported(candidate, intoPDF)) {
+				langs.add(candidate.name().toLowerCase());
+			}
+		}
+		if (langs.isEmpty()) {
+			return "none";
+		}
+		return String.join(", ", langs);
 	}
 
 	/**
