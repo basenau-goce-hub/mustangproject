@@ -32,13 +32,24 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.net.JarURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.Enumeration;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -103,51 +114,128 @@ public class ZUGFeRDVisualizer {
 	private Templates mXsltXRTemplate = null;
 	private Templates mXsltUBLTemplate = null;
 	private Templates mXsltCIOTemplate = null;
-	private EnumMap<Language, Templates> mXsltHTMLTemplates = null;
+	private Map<String, Templates> mXsltHTMLTemplates = null;
 	private Templates mXsltPDFTemplate = null;
 	private Templates mXsltZF1HTMLTemplate = null;
+	private Set<String> availableHTMLLanguages = null;
+	private Set<String> availablePDFLanguages = null;
 
 	private boolean resourceExists(String resourcePath) {
 		return CLASS_LOADER.getResource(resourcePath) != null;
 	}
 
 	public boolean isLanguageSupported(Language lang, boolean forPDF) {
-		if (lang == null) {
+		return isLanguageSupported(lang != null ? lang.name().toLowerCase() : null, forPDF);
+	}
+
+	public boolean isLanguageSupported(String langCode, boolean forPDF) {
+		if ((langCode == null) || (langCode.length() == 0)) {
 			return false;
 		}
-		String langCode = lang.name().toLowerCase();
-		if (forPDF) {
-			// PDF uses xr-pdf + l10n files for labels
-			return resourceExists("stylesheets/l10n/" + langCode + ".xml");
-		}
-		// HTML uses dedicated templates per language; l10n is not required there
-		return resourceExists("stylesheets/xrechnung-html." + langCode + ".xsl");
+		return getAvailableLanguages(forPDF).contains(langCode.toLowerCase());
 	}
 
 	public String getMissingLanguageResources(Language lang, boolean forPDF) {
-		if (lang == null) {
+		return getMissingLanguageResources(lang != null ? lang.name().toLowerCase() : null, forPDF);
+	}
+
+	public String getMissingLanguageResources(String langCode, boolean forPDF) {
+		if ((langCode == null) || (langCode.length() == 0)) {
 			return "language not specified";
 		}
-		ArrayList<String> missing = new ArrayList<>();
-		String langCode = lang.name().toLowerCase();
-		if (forPDF) {
-			if (!resourceExists("stylesheets/l10n/" + langCode + ".xml")) {
-				missing.add("stylesheets/l10n/" + langCode + ".xml");
-			}
-		} else if (!resourceExists("stylesheets/xrechnung-html." + langCode + ".xsl")) {
-			missing.add("stylesheets/xrechnung-html." + langCode + ".xsl");
-		}
-		if (missing.isEmpty()) {
+		if (isLanguageSupported(langCode, forPDF)) {
 			return "";
+		}
+		ArrayList<String> missing = new ArrayList<>();
+		String normalized = langCode.toLowerCase();
+		if (forPDF) {
+			missing.add("stylesheets/l10n/" + normalized + ".xml");
+		} else {
+			missing.add("stylesheets/xrechnung-html." + normalized + ".xsl");
 		}
 		return String.join(", ", missing);
 	}
 
-	private Language getLanguageOrDefault(Language lang) {
-		if (lang == null) {
-			return Language.DE;
+	// Check available languages at runtime by scanning existing templates/l10n resources.
+	public Set<String> getAvailableLanguages(boolean forPDF) {
+		if (forPDF) {
+			if (availablePDFLanguages == null) {
+				availablePDFLanguages = listLanguages("stylesheets/l10n", "", ".xml");
+			}
+			return availablePDFLanguages;
 		}
-		return lang;
+		if (availableHTMLLanguages == null) {
+			availableHTMLLanguages = listLanguages("stylesheets", "xrechnung-html.", ".xsl");
+		}
+		return availableHTMLLanguages;
+	}
+
+	private Set<String> listLanguages(String basePath, String prefix, String suffix) {
+		Set<String> langs = new TreeSet<>();
+		try {
+			Enumeration<URL> resources = CLASS_LOADER.getResources(basePath);
+			while (resources.hasMoreElements()) {
+				URL url = resources.nextElement();
+				String protocol = url.getProtocol();
+				if ("file".equalsIgnoreCase(protocol)) {
+					Path dir = Paths.get(url.toURI());
+					try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, prefix + "*" + suffix)) {
+						for (Path entry : stream) {
+							String fileName = entry.getFileName().toString();
+							String code = extractLanguageCode(fileName, prefix, suffix);
+							if (code != null) {
+								langs.add(code);
+							}
+						}
+					}
+				} else if ("jar".equalsIgnoreCase(protocol)) {
+					JarURLConnection conn = (JarURLConnection) url.openConnection();
+					try (JarFile jar = conn.getJarFile()) {
+						Enumeration<JarEntry> entries = jar.entries();
+						while (entries.hasMoreElements()) {
+							JarEntry entry = entries.nextElement();
+							if (entry.isDirectory()) {
+								continue;
+							}
+							String name = entry.getName();
+							if (!name.startsWith(basePath)) {
+								continue;
+							}
+							String fileName = name.substring(name.lastIndexOf('/') + 1);
+							String code = extractLanguageCode(fileName, prefix, suffix);
+							if (code != null) {
+								langs.add(code);
+							}
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			LOGGER.warn("Failed to list languages for {}: {}", basePath, e.getMessage());
+		}
+		return langs;
+	}
+
+	private String extractLanguageCode(String fileName, String prefix, String suffix) {
+		if (!fileName.startsWith(prefix) || !fileName.endsWith(suffix)) {
+			return null;
+		}
+		if (fileName.length() <= prefix.length() + suffix.length()) {
+			return null;
+		}
+		String code = fileName.substring(prefix.length(), fileName.length() - suffix.length());
+		// Only accept plain language tokens (e.g. de, en, fr). Skip variants like "de.ids" or "univ"
+		if (!code.matches("^[a-zA-Z]{2,3}$")) {
+			return null;
+		}
+		return code.toLowerCase();
+	}
+
+	private String getLanguageOrDefault(String langCode) {
+		if ((langCode == null) || (langCode.length() == 0)) {
+			return "de";
+		}
+		return langCode.toLowerCase();
 	}
 
 	public ZUGFeRDVisualizer() {
@@ -225,14 +313,28 @@ public class ZUGFeRDVisualizer {
 
 	public String visualize(String xmlFilename, Language lang)
 		throws IOException, TransformerException, ParserConfigurationException {
+		return visualize(xmlFilename, (lang != null) ? lang.name().toLowerCase() : null);
+	}
+
+	public String visualize(String xmlFilename, String langCode)
+		throws IOException, TransformerException, ParserConfigurationException {
 		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
-			return visualize(fis, lang);
+			return visualize(fis, langCode);
 		}
 	}
 
 	public String visualize(InputStream inputXml, Language lang)
 		throws IOException, TransformerException, ParserConfigurationException {
-		initTemplates(lang);
+		return visualize(inputXml, (lang != null) ? lang.name().toLowerCase() : null);
+	}
+
+	public String visualize(InputStream inputXml, String langCode)
+		throws IOException, TransformerException, ParserConfigurationException {
+		String normalizedLang = getLanguageOrDefault(langCode);
+		if (!isLanguageSupported(normalizedLang, false)) {
+			throw new IllegalArgumentException("Unsupported language code '" + normalizedLang + "' for HTML output.");
+		}
+		initTemplates(normalizedLang);
 
 		String fileContent = new String(IOUtils.toByteArray(inputXml), StandardCharsets.UTF_8);
 		EStandard thestandard = findOutStandardFromRootNode(new ByteArrayInputStream(fileContent.getBytes(StandardCharsets.UTF_8)));
@@ -262,7 +364,7 @@ public class ZUGFeRDVisualizer {
 		Optional<InputStream> in = copyStream(htmlOutput);
 		ByteArrayOutputStream htmlOutStream = new ByteArrayOutputStream();
 		if (in.isPresent()) {
-			applyXSLTToHTML(in.get(), htmlOutStream, lang);
+			applyXSLTToHTML(in.get(), htmlOutStream, normalizedLang);
 		}
 
 		return htmlOutStream.toString(StandardCharsets.UTF_8);
@@ -299,18 +401,18 @@ public class ZUGFeRDVisualizer {
 	}
 
 
-	private void initTemplates(Language lang) throws TransformerConfigurationException {
+	private void initTemplates(String langCode) throws TransformerConfigurationException {
 		if (mXsltXRTemplate == null) {
 			mXsltXRTemplate = mFactory.newTemplates(
 				new StreamSource(CLASS_LOADER.getResourceAsStream(RESOURCE_PATH + "stylesheets/cii-xr.xsl")));
 		}
 
 		if (mXsltHTMLTemplates == null) {
-			mXsltHTMLTemplates = new EnumMap<>(Language.class);
+			mXsltHTMLTemplates = new java.util.HashMap<>();
 		}
-		if (mXsltHTMLTemplates.get(lang) == null) {
-			Templates mXsltHTMLTemplate = mFactory.newTemplates(new StreamSource(CLASS_LOADER.getResourceAsStream(RESOURCE_PATH + "stylesheets/xrechnung-html." + lang.name().toLowerCase() + ".xsl")));
-			mXsltHTMLTemplates.put(lang, mXsltHTMLTemplate);
+		if (mXsltHTMLTemplates.get(langCode) == null) {
+			Templates mXsltHTMLTemplate = mFactory.newTemplates(new StreamSource(CLASS_LOADER.getResourceAsStream(RESOURCE_PATH + "stylesheets/xrechnung-html." + langCode + ".xsl")));
+			mXsltHTMLTemplates.put(langCode, mXsltHTMLTemplate);
 		}
 		if (mXsltZF1HTMLTemplate == null) {
 			mXsltZF1HTMLTemplate = mFactory.newTemplates(new StreamSource(
@@ -320,22 +422,29 @@ public class ZUGFeRDVisualizer {
 
 	protected String toFOP(String xmlFilename)
 		throws IOException, TransformerException, ParserConfigurationException {
-		return toFOP(xmlFilename, Language.DE);
-	}
-
-	protected String toFOP(String xmlFilename, Language lang)
-		throws IOException, TransformerException, ParserConfigurationException {
 		EStandard theStandard;
 		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
 			theStandard = findOutStandardFromRootNode(fis);
 		}
 		
 		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
-			return toFOP(fis, theStandard, lang);
+			return toFOP(fis, theStandard, "de");
 		}
 	}
 
-	protected String toFOP(InputStream is, EStandard theStandard, Language lang)
+	protected String toFOP(String xmlFilename, String langCode)
+		throws IOException, TransformerException, ParserConfigurationException {
+		EStandard theStandard;
+		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
+			theStandard = findOutStandardFromRootNode(fis);
+		}
+
+		try (FileInputStream fis = new FileInputStream(xmlFilename)) {
+			return toFOP(fis, theStandard, langCode);
+		}
+	}
+
+	protected String toFOP(InputStream is, EStandard theStandard, String langCode)
 		throws TransformerException, IOException {
 
 		try {
@@ -362,19 +471,28 @@ public class ZUGFeRDVisualizer {
 		Optional<InputStream> in = copyStream(iaos);
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
 		if (in.isPresent()) {
-			applyXSLTToPDF(in.get(), baos, lang);
+			applyXSLTToPDF(in.get(), baos, langCode);
 		}
 		return baos.toString(StandardCharsets.UTF_8);
 	}
 
 	public void toPDF(String xmlFilename, String pdfFilename) {
-		toPDF(xmlFilename, pdfFilename, Language.DE);
+		toPDF(xmlFilename, pdfFilename, "de");
 	}
 
 	public void toPDF(String xmlFilename, String pdfFilename, Language lang) {
+		toPDF(xmlFilename, pdfFilename, (lang != null) ? lang.name().toLowerCase() : null);
+	}
+
+	public void toPDF(String xmlFilename, String pdfFilename, String lang) {
 
 		// the writing part
 		File XMLinputFile = new File(xmlFilename);
+
+		String normalizedLang = getLanguageOrDefault(lang);
+		if (!isLanguageSupported(normalizedLang, true)) {
+			throw new IllegalArgumentException("Unsupported language code '" + normalizedLang + "' for PDF output.");
+		}
 
 		String fopInput = null;
 
@@ -382,7 +500,7 @@ public class ZUGFeRDVisualizer {
 			   out from git with arbitrary options (which may include CSRF changes)
 			 */
 		try {
-			fopInput = this.toFOP(XMLinputFile.getAbsolutePath(), lang);
+			fopInput = this.toFOP(XMLinputFile.getAbsolutePath(), normalizedLang);
 		} catch (TransformerException | IOException | ParserConfigurationException e) {
 			LOGGER.error("Failed to apply FOP", e);
 		}
@@ -402,18 +520,22 @@ public class ZUGFeRDVisualizer {
 	}
 
 	public byte[] toPDF(String xmlContent, Language lang) {
+		return toPDFContent(xmlContent, (lang != null) ? lang.name().toLowerCase() : null);
+	}
 
+	private byte[] toPDFContent(String xmlContent, String langCode) {
 		String fopInput = null;
+		String normalizedLang = getLanguageOrDefault(langCode);
+		if (!isLanguageSupported(normalizedLang, true)) {
+			throw new IllegalArgumentException("Unsupported language code '" + normalizedLang + "' for PDF output.");
+		}
 
-			/* remove file endings so that tests can also pass after checking
-			   out from git with arbitrary options (which may include CSRF changes)
-			 */
 		try {
 			ByteArrayInputStream fis = new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8));
 			EStandard theStandard = findOutStandardFromRootNode(fis);
 			fis = new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8));//rewind :-(
 			
-			fopInput = toFOP(fis, theStandard, lang);
+			fopInput = toFOP(fis, theStandard, normalizedLang);
 		} catch (TransformerException | IOException | ParserConfigurationException e) {
 			LOGGER.error("Failed to apply FOP", e);
 		}
@@ -432,7 +554,7 @@ public class ZUGFeRDVisualizer {
 		
 		return byteHolder.get();
 	}
-	
+
 	private void toPDFfromFOP(String fopInput, Supplier<OutputStream> outputStreamDelegate, Consumer<OutputStream> consumerDelegate) {
 
 		DefaultConfigurationBuilder cfgBuilder = new DefaultConfigurationBuilder();
@@ -541,18 +663,18 @@ public class ZUGFeRDVisualizer {
 		transformer.transform(new StreamSource(xmlFile), new StreamResult(htmlOutStream));
 	}
 
-	protected void applyXSLTToHTML(final InputStream xmlFile, final OutputStream htmlOutStream, Language lang)
+	protected void applyXSLTToHTML(final InputStream xmlFile, final OutputStream htmlOutStream, String langCode)
 		throws TransformerException, IOException {
-		Transformer transformer = mXsltHTMLTemplates.get(lang).newTransformer();
+		Transformer transformer = mXsltHTMLTemplates.get(langCode).newTransformer();
 
 		transformer.transform(new StreamSource(xmlFile), new StreamResult(htmlOutStream));
 		xmlFile.close();
 	}
 
-	protected void applyXSLTToPDF(final InputStream xmlFile, final OutputStream PDFOutstream, Language lang)
+	protected void applyXSLTToPDF(final InputStream xmlFile, final OutputStream PDFOutstream, String langCode)
 		throws TransformerException, IOException {
 		Transformer transformer = mXsltPDFTemplate.newTransformer();
-		transformer.setParameter("lang", getLanguageOrDefault(lang).name().toLowerCase());
+		transformer.setParameter("lang", getLanguageOrDefault(langCode));
 
 		transformer.transform(new StreamSource(xmlFile), new StreamResult(PDFOutstream));
 		xmlFile.close();
