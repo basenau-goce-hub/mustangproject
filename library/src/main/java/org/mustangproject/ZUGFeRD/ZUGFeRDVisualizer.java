@@ -224,7 +224,7 @@ public class ZUGFeRDVisualizer {
 			return null;
 		}
 		String code = fileName.substring(prefix.length(), fileName.length() - suffix.length());
-		// Only accept plain language tokens (e.g. de, en, fr). Skip variants like "de.ids" or "univ"
+		// Only accept plain language tokens (e.g. de, en, fr). Skip variants like "de.ids" or "univ" etc.
 		if (!code.matches("^[a-zA-Z]{2,3}$")) {
 			return null;
 		}
